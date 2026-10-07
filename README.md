@@ -48,10 +48,35 @@ docker run --rm -v "$PWD":/src -w /src -u $(id -u):$(id -g) -e HOME=/tmp \
 
 ## Install
 
-1. Copy `Jellyfin.Plugin.SmartShuffle/bin/Release/net10.0/Jellyfin.Plugin.SmartShuffle.dll` to
-   `<jellyfin data dir>/plugins/SmartShuffle/`, then restart Jellyfin.
-2. Create a collection called **Smart Shuffle** and add the shows.
-3. Go to Dashboard → Plugins → Smart Shuffle, tick your user, and save. Saving builds the playlists.
+### From the plugin repository
+
+1. In Dashboard → Plugins → Repositories, add this repository URL:
+   ```
+   https://raw.githubusercontent.com/daniel--/jellyfin-smart-shuffle/gh-pages/manifest.json
+   ```
+2. Install **Smart Shuffle** from the catalog, then restart Jellyfin.
+
+### Manually
+
+Copy `Jellyfin.Plugin.SmartShuffle/bin/Release/net10.0/Jellyfin.Plugin.SmartShuffle.dll` to
+`<jellyfin data dir>/plugins/SmartShuffle/`, then restart Jellyfin.
+
+### Setup
+
+1. Create a collection called **Smart Shuffle** and add the shows.
+2. Go to Dashboard → Plugins → Smart Shuffle, tick your user, and save. Saving builds the playlists.
+
+## Releasing
+
+Publish a GitHub release with a tag like `v0.2.0` (or `v0.2.0.1`). The `Release` workflow then:
+
+1. Builds the plugin zip with [jprm](https://github.com/oddstr13/jellyfin-plugin-repository-manager),
+   using the release notes as the changelog.
+2. Attaches the zip to the release.
+3. Adds the new version to `manifest.json` on the `gh-pages` branch.
+
+Pre-releases get the zip attached but are not added to the manifest. When you move to a new
+Jellyfin version, bump `targetAbi` in `build.yaml` and the package versions in the `.csproj`.
 
 ## Things to verify on a real server
 

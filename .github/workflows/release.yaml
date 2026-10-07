@@ -1,0 +1,93 @@
+name: Release
+
+# Publish a GitHub release tagged vX.Y.Z (or vX.Y.Z.W) to build the plugin zip, attach it to the
+# release, and add it to the plugin repository manifest on the gh-pages branch.
+# Pre-releases get the zip attached but are not added to the manifest.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+# Manifest updates must not race each other.
+concurrency:
+  group: plugin-repo
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - run: pip install jprm
+
+      - name: Work out plugin version
+        run: |
+          version="${TAG#v}"
+          if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            version="$version.0"
+          fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag '$TAG' is not vX.Y.Z or vX.Y.Z.W"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Use release notes as changelog
+        env:
+          NOTES: ${{ github.event.release.body }}
+        run: |
+          if [[ -n "$NOTES" ]]; then
+            yq -i '.changelog = strenv(NOTES)' build.yaml
+          fi
+
+      - name: Build plugin zip
+        run: |
+          mkdir -p artifacts
+          zip=$(jprm --verbosity=debug plugin build . \
+            --output=artifacts \
+            --version="$VERSION" \
+            --dotnet-framework=net10.0 \
+            --dotnet-configuration=Release)
+          echo "ZIP=$zip" >> "$GITHUB_ENV"
+
+      - name: Attach zip to release
+        run: gh release upload "$TAG" "$ZIP" --clobber
+
+      - name: Add to plugin repository manifest
+        if: ${{ !github.event.release.prerelease }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          if git fetch --depth=1 origin gh-pages:refs/remotes/origin/gh-pages; then
+            git worktree add -B gh-pages repo origin/gh-pages
+          else
+            git worktree add --orphan -b gh-pages repo
+          fi
+
+          if [[ ! -f repo/manifest.json ]]; then
+            jprm repo init repo
+          fi
+
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/$(basename "$ZIP")"
+          jprm --verbosity=debug repo add --plugin-url="$url" repo "$ZIP"
+
+          cd repo
+          git add manifest.json
+          git commit -m "Add Smart Shuffle $VERSION"
+          git push origin gh-pages
