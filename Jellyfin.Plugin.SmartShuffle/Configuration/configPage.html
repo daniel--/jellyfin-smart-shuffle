@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Smart Shuffle</title>
+</head>
+<body>
+    <div id="SmartShuffleConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-select,emby-checkbox">
+        <div data-role="content">
+            <div class="content-primary">
+                <form id="SmartShuffleConfigForm">
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="CollectionName">Collection</label>
+                        <input id="CollectionName" name="CollectionName" type="text" is="emby-input" />
+                        <div class="fieldDescription">Name of the collection holding the shows to shuffle.</div>
+                    </div>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="PlaylistName">Playlist name</label>
+                        <input id="PlaylistName" name="PlaylistName" type="text" is="emby-input" />
+                    </div>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="PlaylistLength">Playlist length</label>
+                        <input id="PlaylistLength" name="PlaylistLength" type="number" is="emby-input" min="1" max="500" />
+                        <div class="fieldDescription">Number of upcoming episodes kept in the playlist.</div>
+                    </div>
+                    <div class="selectContainer">
+                        <label class="selectLabel" for="Weighting">Show selection</label>
+                        <select is="emby-select" id="Weighting" name="Weighting" class="emby-select-withcolor emby-select">
+                            <option value="RemainingEpisodes">Weighted by episodes left (shows finish together)</option>
+                            <option value="Uniform">Equal chance per show</option>
+                        </select>
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="AvoidBackToBack" type="checkbox" is="emby-checkbox" />
+                            <span>Avoid the same show twice in a row</span>
+                        </label>
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="LoopFinishedShows" type="checkbox" is="emby-checkbox" />
+                            <span>Start a show again from the first episode once finished</span>
+                        </label>
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="IncludeSpecials" type="checkbox" is="emby-checkbox" />
+                            <span>Include specials</span>
+                        </label>
+                    </div>
+                    <div class="inputContainer">
+                        <label class="inputLabel inputLabelUnfocused" for="ResumeSeekDelaySeconds">Resume delay (seconds)</label>
+                        <input id="ResumeSeekDelaySeconds" name="ResumeSeekDelaySeconds" type="number" is="emby-input" min="0" max="30" />
+                        <div class="fieldDescription">How long to wait after playback starts before jumping to the saved position. Increase if a client ignores the jump.</div>
+                    </div>
+                    <h3>Users</h3>
+                    <div id="UserList" class="checkboxList"></div>
+                    <div>
+                        <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                            <span>Save</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <script type="text/javascript">
+            var SmartShuffleConfig = {
+                pluginUniqueId: 'a164f7e5-8474-44d6-9c0a-74e85cb3a7b1'
+            };
+
+            function escapeHtml(value) {
+                var div = document.createElement('div');
+                div.textContent = value;
+                return div.innerHTML;
+            }
+
+            document.querySelector('#SmartShuffleConfigPage')
+                .addEventListener('pageshow', function () {
+                    Dashboard.showLoadingMsg();
+                    Promise.all([
+                        ApiClient.getPluginConfiguration(SmartShuffleConfig.pluginUniqueId),
+                        ApiClient.getUsers()
+                    ]).then(function (results) {
+                        var config = results[0];
+                        var users = results[1];
+                        document.querySelector('#CollectionName').value = config.CollectionName;
+                        document.querySelector('#PlaylistName').value = config.PlaylistName;
+                        document.querySelector('#PlaylistLength').value = config.PlaylistLength;
+                        document.querySelector('#Weighting').value = config.Weighting;
+                        document.querySelector('#AvoidBackToBack').checked = config.AvoidBackToBack;
+                        document.querySelector('#LoopFinishedShows').checked = config.LoopFinishedShows;
+                        document.querySelector('#IncludeSpecials').checked = config.IncludeSpecials;
+                        document.querySelector('#ResumeSeekDelaySeconds').value = config.ResumeSeekDelaySeconds;
+
+                        var enabled = (config.EnabledUserIds || []).map(function (id) {
+                            return id.replace(/-/g, '').toLowerCase();
+                        });
+                        document.querySelector('#UserList').innerHTML = users.map(function (user) {
+                            var checked = enabled.indexOf(user.Id.replace(/-/g, '').toLowerCase()) !== -1 ? ' checked' : '';
+                            return '<label class="emby-checkbox-label"><input type="checkbox" is="emby-checkbox" class="chkUser" data-id="'
+                                + user.Id + '"' + checked + ' /><span>' + escapeHtml(user.Name) + '</span></label>';
+                        }).join('');
+
+                        Dashboard.hideLoadingMsg();
+                    });
+                });
+
+            document.querySelector('#SmartShuffleConfigForm')
+                .addEventListener('submit', function (e) {
+                    Dashboard.showLoadingMsg();
+                    ApiClient.getPluginConfiguration(SmartShuffleConfig.pluginUniqueId).then(function (config) {
+                        config.CollectionName = document.querySelector('#CollectionName').value;
+                        config.PlaylistName = document.querySelector('#PlaylistName').value;
+                        config.PlaylistLength = parseInt(document.querySelector('#PlaylistLength').value, 10) || 50;
+                        config.Weighting = document.querySelector('#Weighting').value;
+                        config.AvoidBackToBack = document.querySelector('#AvoidBackToBack').checked;
+                        config.LoopFinishedShows = document.querySelector('#LoopFinishedShows').checked;
+                        config.IncludeSpecials = document.querySelector('#IncludeSpecials').checked;
+                        config.ResumeSeekDelaySeconds = parseInt(document.querySelector('#ResumeSeekDelaySeconds').value, 10) || 0;
+                        config.EnabledUserIds = Array.prototype.map.call(
+                            document.querySelectorAll('.chkUser:checked'),
+                            function (el) { return el.getAttribute('data-id'); });
+                        ApiClient.updatePluginConfiguration(SmartShuffleConfig.pluginUniqueId, config).then(function (result) {
+                            Dashboard.processPluginConfigurationUpdateResult(result);
+                        });
+                    });
+
+                    e.preventDefault();
+                    return false;
+                });
+        </script>
+    </div>
+</body>
+</html>

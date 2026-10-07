@@ -1,0 +1,18 @@
+---
+name: "Smart Shuffle"
+guid: "a164f7e5-8474-44d6-9c0a-74e85cb3a7b1"
+version: "0.1.0.0"
+targetAbi: "12.2.0.0"
+framework: "net10.0"
+overview: "Shuffle a set of TV shows while keeping each show's episodes in order"
+description: >
+  Builds a per-user "Smart Shuffle" playlist from the series in a collection.
+  Shows are interleaved randomly, episodes within a show stay in order, and
+  progress is tracked by the plugin so the shows keep their watched state and
+  stay out of Next Up and Continue Watching.
+category: "General"
+owner: "daniel"
+artifacts:
+- "Jellyfin.Plugin.SmartShuffle.dll"
+changelog: >
+  Initial scaffold.
