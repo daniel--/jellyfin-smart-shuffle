@@ -13,6 +13,7 @@ using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Playlists;
+using MediaBrowser.Controller.Session;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Playlists;
 using Microsoft.Extensions.Logging;
@@ -27,10 +28,14 @@ public class ShuffleService
     // Only skip the resume seek if the client already started near the saved position.
     private static readonly long _alreadyResumedTolerance = TimeSpan.FromSeconds(30).Ticks;
 
+    // Jellyfin 12.1 stamps LastPlayedDate when playback starts; a date this recent means it was overwritten.
+    private static readonly TimeSpan _justStampedWindow = TimeSpan.FromMinutes(2);
+
     private readonly ILibraryManager _libraryManager;
     private readonly IUserManager _userManager;
     private readonly IUserDataManager _userDataManager;
     private readonly IPlaylistManager _playlistManager;
+    private readonly ISessionManager _sessionManager;
     private readonly ShuffleStateStore _store;
     private readonly ILogger<ShuffleService> _logger;
 
@@ -41,6 +46,7 @@ public class ShuffleService
     /// <param name="userManager">The user manager.</param>
     /// <param name="userDataManager">The user data manager.</param>
     /// <param name="playlistManager">The playlist manager.</param>
+    /// <param name="sessionManager">The session manager.</param>
     /// <param name="store">The state store.</param>
     /// <param name="logger">The logger.</param>
     public ShuffleService(
@@ -48,6 +54,7 @@ public class ShuffleService
         IUserManager userManager,
         IUserDataManager userDataManager,
         IPlaylistManager playlistManager,
+        ISessionManager sessionManager,
         ShuffleStateStore store,
         ILogger<ShuffleService> logger)
     {
@@ -55,6 +62,7 @@ public class ShuffleService
         _userManager = userManager;
         _userDataManager = userDataManager;
         _playlistManager = playlistManager;
+        _sessionManager = sessionManager;
         _store = store;
         _logger = logger;
     }
@@ -127,18 +135,16 @@ public class ShuffleService
             {
                 var userState = state.ForUser(user.Id);
 
-                // Jellyfin has already run its own playback-start bookkeeping when this fires. For an
-                // already watched episode that is only PlayCount++ (LastPlayedDate is left alone until
-                // progress passes the resume threshold), so the original values are still recoverable.
                 // Keep an existing snapshot: it holds the true original if an earlier stop was missed.
-                var data = _userDataManager.GetUserData(user, episode);
-                if (data is { Played: true } && !userState.PendingRestores.ContainsKey(episode.Id))
+                if (!userState.PendingRestores.ContainsKey(episode.Id))
                 {
-                    userState.PendingRestores[episode.Id] = new UserDataSnapshot
+                    var snapshot = userState.Baselines.Remove(episode.Id, out var baseline)
+                        ? baseline
+                        : SnapshotAfterStart(user, episode);
+                    if (snapshot is not null)
                     {
-                        PlayCount = Math.Max(0, data.PlayCount - 1),
-                        LastPlayedDate = data.LastPlayedDate
-                    };
+                        userState.PendingRestores[episode.Id] = snapshot;
+                    }
                 }
 
                 long? seekTo = null;
@@ -199,6 +205,66 @@ public class ShuffleService
             cancellationToken);
     }
 
+    /// <summary>
+    /// Fallback for episodes started outside the playlist, which have no baseline. Jellyfin has already
+    /// done PlayCount++ by the time the start event fires, so that can be undone. 12.2 leaves LastPlayedDate
+    /// alone for watched episodes, but 12.1 overwrites it, in which case the original is lost.
+    /// </summary>
+    private UserDataSnapshot? SnapshotAfterStart(User user, Episode episode)
+    {
+        var data = _userDataManager.GetUserData(user, episode);
+        if (data is not { Played: true })
+        {
+            return null;
+        }
+
+        var dateWasStamped = data.LastPlayedDate > DateTime.UtcNow - _justStampedWindow;
+        return new UserDataSnapshot
+        {
+            PlayCount = Math.Max(0, data.PlayCount - 1),
+            LastPlayedDate = data.LastPlayedDate,
+            KeepCurrentLastPlayedDate = dateWasStamped
+        };
+    }
+
+    /// <summary>
+    /// Records the untouched user data of every queued episode, so it can be put back after playback.
+    /// Must run before playback starts: Jellyfin changes the data before plugins hear about it.
+    /// </summary>
+    private void CaptureBaselines(User user, UserShuffleState userState, List<Episode> queue)
+    {
+        var queued = queue.Select(e => e.Id).ToHashSet();
+        foreach (var id in userState.Baselines.Keys.Where(id => !queued.Contains(id)).ToList())
+        {
+            userState.Baselines.Remove(id);
+        }
+
+        var playing = _sessionManager.Sessions
+            .Select(s => s.NowPlayingItem?.Id)
+            .OfType<Guid>()
+            .ToHashSet();
+
+        foreach (var episode in queue)
+        {
+            if (userState.Baselines.ContainsKey(episode.Id)
+                || userState.PendingRestores.ContainsKey(episode.Id)
+                || playing.Contains(episode.Id))
+            {
+                continue;
+            }
+
+            var data = _userDataManager.GetUserData(user, episode);
+            if (data is { Played: true, PlaybackPositionTicks: 0 })
+            {
+                userState.Baselines[episode.Id] = new UserDataSnapshot
+                {
+                    PlayCount = data.PlayCount,
+                    LastPlayedDate = data.LastPlayedDate
+                };
+            }
+        }
+    }
+
     private void MarkFinished(User user, UserShuffleState userState, Episode episode)
     {
         if (episode.Series is not Series series)
@@ -254,7 +320,10 @@ public class ShuffleService
             if (snapshot is not null && version.Id.Equals(episode.Id))
             {
                 data.PlayCount = snapshot.PlayCount;
-                data.LastPlayedDate = snapshot.LastPlayedDate;
+                if (!snapshot.KeepCurrentLastPlayedDate)
+                {
+                    data.LastPlayedDate = snapshot.LastPlayedDate;
+                }
             }
 
             _userDataManager.SaveUserData(user, version, data, UserDataSaveReason.UpdateUserData, CancellationToken.None);
@@ -268,6 +337,7 @@ public class ShuffleService
             .ToDictionary(s => s.Id, s => GetEpisodes(s, user));
 
         var queue = BuildQueue(userState, episodesBySeries);
+        CaptureBaselines(user, userState, queue);
         await PublishAsync(user, userState, queue).ConfigureAwait(false);
     }
 

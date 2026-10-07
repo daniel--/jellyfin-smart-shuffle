@@ -30,7 +30,12 @@ public class UserShuffleState
     public Dictionary<Guid, long> ResumePositions { get; init; } = [];
 
     /// <summary>
-    /// Gets Jellyfin user data captured when playback started, restored when it stops. By episode id.
+    /// Gets Jellyfin user data of queued episodes, captured before they are played. By episode id.
+    /// </summary>
+    public Dictionary<Guid, UserDataSnapshot> Baselines { get; init; } = [];
+
+    /// <summary>
+    /// Gets the user data to put back when playback stops, for episodes currently playing. By episode id.
     /// </summary>
     public Dictionary<Guid, UserDataSnapshot> PendingRestores { get; init; } = [];
 

@@ -2,7 +2,7 @@
 name: "Smart Shuffle"
 guid: "a164f7e5-8474-44d6-9c0a-74e85cb3a7b1"
 version: "0.1.0.0"
-targetAbi: "12.2.0.0"
+targetAbi: "12.1.0.0"
 framework: "net10.0"
 overview: "Shuffle a set of TV shows while keeping each show's episodes in order"
 description: >

@@ -1,6 +1,6 @@
 # Jellyfin Smart Shuffle
 
-A Jellyfin 12.2 plugin that shuffles a set of TV shows while keeping each show's episodes in order.
+A Jellyfin 12.1+ plugin that shuffles a set of TV shows while keeping each show's episodes in order.
 
 - Shows come from a collection (default name **Smart Shuffle**).
 - Each enabled user gets a private **Smart Shuffle** playlist: shows are interleaved randomly,
@@ -24,8 +24,11 @@ The upcoming order is stored as a list of **show slots**, not episodes. Each slo
 derived from that show's progress, so episode order within a show can't break, even if you watch
 out of order.
 
-**On playback start:** Jellyfin has already incremented the play count. For a watched episode it
-leaves `LastPlayedDate` alone, so the plugin snapshots the original values. If a position is saved,
+**On playlist refresh:** the plugin records each queued episode's play count and last played date.
+This has to happen before playback, because Jellyfin 12.1 overwrites `LastPlayedDate` as soon as
+playback starts, before plugins are notified.
+
+**On playback start:** the recorded values are set aside to restore later. If a position is saved,
 it seeks there after `ResumeSeekDelaySeconds`.
 
 **On playback stop:**
@@ -34,7 +37,7 @@ it seeks there after `ResumeSeekDelaySeconds`.
 2. The episode's user data is restored: position cleared, play count and last played date put back.
 3. The playlist is refreshed.
 
-Jellyfin 12.2 never clears `Played` during playback (see `SessionManager.OnPlaybackStart` and
+Jellyfin 12.1 and 12.2 never clear `Played` during playback (see `SessionManager.OnPlaybackStart` and
 `UserDataManager.UpdatePlayState`), so watched episodes stay watched without the plugin touching it.
 
 ## Build
@@ -94,3 +97,5 @@ Jellyfin version, bump `targetAbi` in `build.yaml` and the package versions in t
 - For episodes with multiple versions, the play count and date are only restored on the main
   version; resume positions are cleared on all versions.
 - Playlist edits made by hand are overwritten on the next refresh.
+- On Jellyfin 12.1, a shuffle episode started from outside the playlist (e.g. from the show's page)
+  keeps the new last played date, which only matters if "rewatching in Next Up" is enabled.
