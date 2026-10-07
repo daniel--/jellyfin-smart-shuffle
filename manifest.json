@@ -1,0 +1,20 @@
+[
+    {
+        "guid": "a164f7e5-8474-44d6-9c0a-74e85cb3a7b1",
+        "name": "Smart Shuffle",
+        "description": "Builds a per-user \"Smart Shuffle\" playlist from the series in a collection. Shows are interleaved randomly, episodes within a show stay in order, and progress is tracked by the plugin so the shows keep their watched state and stay out of Next Up and Continue Watching.\n",
+        "overview": "Shuffle a set of TV shows while keeping each show's episodes in order",
+        "owner": "daniel",
+        "category": "General",
+        "versions": [
+            {
+                "version": "0.1.0.0",
+                "changelog": "Initial release.\n\n- Per-user Smart Shuffle playlist from the shows in a collection\n- Episodes stay in order within each show\n- Shows stay watched and out of Next Up / Continue Watching\n- Resume partly watched episodes via remote seek",
+                "targetAbi": "12.2.0.0",
+                "sourceUrl": "https://github.com/daniel--/jellyfin-smart-shuffle/releases/download/v0.1.0/smart-shuffle_0.1.0.0.zip",
+                "checksum": "a1d01de9bef08b76ce2fe65c2fc74a34",
+                "timestamp": "2026-10-07T18:37:46Z"
+            }
+        ]
+    }
+]
