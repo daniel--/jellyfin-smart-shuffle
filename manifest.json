@@ -8,6 +8,14 @@
         "category": "General",
         "versions": [
             {
+                "version": "0.2.0.0",
+                "changelog": "- Keeps players' queues in sync with the current Smart Shuffle playlist. When a player starts an episode from an out-of-date or re-sorted copy of the playlist, the plugin replaces its queue with the current one (the episode restarts briefly). Can be turned off in the plugin settings.",
+                "targetAbi": "12.1.0.0",
+                "sourceUrl": "https://github.com/daniel--/jellyfin-smart-shuffle/releases/download/v0.2.0/smart-shuffle_0.2.0.0.zip",
+                "checksum": "a5ce5fd5c244c2e59d58e80628c074dd",
+                "timestamp": "2026-10-08T21:01:49Z"
+            },
+            {
                 "version": "0.1.1.0",
                 "changelog": "- Supports Jellyfin 12.1 (targetAbi 12.1.0.0)\n- Records play count and last played date before playback, since Jellyfin 12.1 overwrites the last played date when playback starts",
                 "targetAbi": "12.1.0.0",
