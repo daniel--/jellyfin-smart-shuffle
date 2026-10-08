@@ -65,6 +65,12 @@ public class PluginConfiguration : BasePluginConfiguration
     public int ResumeSeekDelaySeconds { get; set; } = 3;
 
     /// <summary>
+    /// Gets or sets a value indicating whether a player moving on through an out-of-date copy of the
+    /// playlist has its queue replaced with the current one.
+    /// </summary>
+    public bool KeepPlayerQueueInSync { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets the ids of the users that get a Smart Shuffle playlist.
     /// </summary>
 #pragma warning disable CA1819 // Properties should not return arrays - required for XML serialization

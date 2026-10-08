@@ -31,6 +31,22 @@ playback starts, before plugins are notified.
 **On playback start:** the recorded values are set aside to restore later. If a position is saved,
 it seeks there after `ResumeSeekDelaySeconds`.
 
+**Keeping players in sync:** a player copies the playlist into its own queue when you press play,
+and may sort it. Later refreshes never reach that copy. Players send their queue with each playback
+start report, but Jellyfin drops it, so the plugin adds an API filter (`Playback/`) that records it.
+After `ResumeSeekDelaySeconds`, the plugin compares that queue with the current playlist:
+
+- **Matches:** nothing to do. New episodes at the end of the playlist are appended without interrupting playback.
+- **Started at the top of a copy of the playlist** (Play was pressed) but not on the playlist's first
+  episode: the player is told to play the current playlist from the start.
+- **Otherwise out of date:** the player is told to play the current playlist from the episode it's on,
+  at the same position. The episode restarts briefly.
+
+Players that don't send their queue at start are checked when they move on to the next episode, using
+the queue Jellyfin keeps from the stop report. Queues with only one show, players in a SyncPlay group,
+and players without remote control are left alone. Turn this off with **Keep players' queues in sync
+with the playlist**.
+
 **On playback stop:**
 1. If finished, the show advances and its first slot is consumed. If not, Jellyfin's saved position
    is copied into the plugin's state.

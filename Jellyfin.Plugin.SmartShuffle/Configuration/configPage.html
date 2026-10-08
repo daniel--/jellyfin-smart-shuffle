@@ -53,6 +53,13 @@
                         <input id="ResumeSeekDelaySeconds" name="ResumeSeekDelaySeconds" type="number" is="emby-input" min="0" max="30" />
                         <div class="fieldDescription">How long to wait after playback starts before jumping to the saved position. Increase if a client ignores the jump.</div>
                     </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="KeepPlayerQueueInSync" type="checkbox" is="emby-checkbox" />
+                            <span>Keep players' queues in sync with the playlist</span>
+                        </label>
+                        <div class="checkboxDescription checkboxDescription-withDescription">When a player starts an episode from an out-of-date or re-sorted copy of the playlist, replace its queue with the current playlist. The episode restarts briefly when this happens.</div>
+                    </div>
                     <h3>Users</h3>
                     <div id="UserList" class="checkboxList"></div>
                     <div>
@@ -91,6 +98,7 @@
                         document.querySelector('#LoopFinishedShows').checked = config.LoopFinishedShows;
                         document.querySelector('#IncludeSpecials').checked = config.IncludeSpecials;
                         document.querySelector('#ResumeSeekDelaySeconds').value = config.ResumeSeekDelaySeconds;
+                        document.querySelector('#KeepPlayerQueueInSync').checked = config.KeepPlayerQueueInSync;
 
                         var enabled = (config.EnabledUserIds || []).map(function (id) {
                             return id.replace(/-/g, '').toLowerCase();
@@ -117,6 +125,7 @@
                         config.LoopFinishedShows = document.querySelector('#LoopFinishedShows').checked;
                         config.IncludeSpecials = document.querySelector('#IncludeSpecials').checked;
                         config.ResumeSeekDelaySeconds = parseInt(document.querySelector('#ResumeSeekDelaySeconds').value, 10) || 0;
+                        config.KeepPlayerQueueInSync = document.querySelector('#KeepPlayerQueueInSync').checked;
                         config.EnabledUserIds = Array.prototype.map.call(
                             document.querySelectorAll('.chkUser:checked'),
                             function (el) { return el.getAttribute('data-id'); });

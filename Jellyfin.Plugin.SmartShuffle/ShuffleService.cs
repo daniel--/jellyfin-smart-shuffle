@@ -84,6 +84,46 @@ public class ShuffleService
     }
 
     /// <summary>
+    /// Gets a value indicating whether a player's queue looks like a copy of a Smart Shuffle playlist:
+    /// only episodes of shuffle shows, from more than one show. A queue from a show's own page has one show.
+    /// </summary>
+    /// <param name="itemIds">The ids in the player's queue.</param>
+    /// <returns>Whether the queue is a shuffle queue.</returns>
+    public bool IsShuffleQueue(IEnumerable<Guid> itemIds)
+    {
+        ArgumentNullException.ThrowIfNull(itemIds);
+
+        var shuffleSeriesIds = GetShuffleSeries().Select(s => s.Id).ToHashSet();
+        var seriesInQueue = new HashSet<Guid>();
+        foreach (var id in itemIds)
+        {
+            if (_libraryManager.GetItemById(id) is not Episode episode || !shuffleSeriesIds.Contains(episode.SeriesId))
+            {
+                return false;
+            }
+
+            seriesInQueue.Add(episode.SeriesId);
+        }
+
+        return seriesInQueue.Count > 1;
+    }
+
+    /// <summary>
+    /// Gets the episodes currently in the user's playlist, in order.
+    /// </summary>
+    /// <param name="user">The user.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>The episode ids.</returns>
+    public Task<List<Guid>> GetPlaylistAsync(User user, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+
+        return _store.UseAsync(
+            state => Task.FromResult(state.ForUser(user.Id).PublishedEpisodeIds.ToList()),
+            cancellationToken);
+    }
+
+    /// <summary>
     /// Rebuilds the playlist of every enabled user.
     /// </summary>
     /// <param name="reshuffle">Whether to throw away the upcoming show order and pick a new one.</param>
