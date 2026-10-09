@@ -158,7 +158,8 @@ public class ShuffleService
 
     /// <summary>
     /// Called when a shuffle episode starts playing. Snapshots the user data Jellyfin is about to change
-    /// and returns the saved position to seek to, if any.
+    /// and returns the saved position to seek to, if any. Episodes that aren't in the user's playlist were
+    /// picked outside the shuffle and are left to Jellyfin.
     /// </summary>
     /// <param name="user">The user.</param>
     /// <param name="episode">The episode.</param>
@@ -174,6 +175,10 @@ public class ShuffleService
             state =>
             {
                 var userState = state.ForUser(user.Id);
+                if (!IsShufflePlayback(userState, episode))
+                {
+                    return Task.FromResult<long?>(null);
+                }
 
                 // Keep an existing snapshot: it holds the true original if an earlier stop was missed.
                 if (!userState.PendingRestores.ContainsKey(episode.Id))
@@ -201,7 +206,7 @@ public class ShuffleService
 
     /// <summary>
     /// Called when a shuffle episode stops. Records progress, puts Jellyfin's user data back the way it
-    /// was, and refreshes the playlist.
+    /// was, and refreshes the playlist. Episodes that aren't in the user's playlist are left to Jellyfin.
     /// </summary>
     /// <param name="user">The user.</param>
     /// <param name="episode">The episode.</param>
@@ -217,6 +222,10 @@ public class ShuffleService
             async state =>
             {
                 var userState = state.ForUser(user.Id);
+                if (!IsShufflePlayback(userState, episode))
+                {
+                    return false;
+                }
 
                 if (playedToCompletion)
                 {
@@ -246,7 +255,18 @@ public class ShuffleService
     }
 
     /// <summary>
-    /// Fallback for episodes started outside the playlist, which have no baseline. Jellyfin has already
+    /// Whether playing <paramref name="episode"/> counts as shuffle playback: it's in the playlist, or it
+    /// was when it started. Other episodes of shuffle shows were picked outside the shuffle, for example
+    /// from the show's page, and don't move the show's progress.
+    /// </summary>
+    private static bool IsShufflePlayback(UserShuffleState userState, Episode episode)
+    {
+        return userState.PublishedEpisodeIds.Contains(episode.Id)
+            || userState.PendingRestores.ContainsKey(episode.Id);
+    }
+
+    /// <summary>
+    /// Fallback for playlist episodes that have no baseline, such as one added since the last refresh. Jellyfin has already
     /// done PlayCount++ by the time the start event fires, so that can be undone. 12.2 leaves LastPlayedDate
     /// alone for watched episodes, but 12.1 overwrites it, in which case the original is lost.
     /// </summary>

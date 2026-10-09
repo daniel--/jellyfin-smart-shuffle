@@ -9,6 +9,8 @@ A Jellyfin 12.1+ plugin that shuffles a set of TV shows while keeping each show'
   watched, and the shows stay out of **Next Up** and **Continue Watching**.
 - Stopping partway through an episode saves the position. Next time the episode starts, the
   plugin sends the client a seek command to jump back to it.
+- Only episodes in the Smart Shuffle playlist count. Watching another episode of a shuffle show,
+  for example from its show page, is left to Jellyfin and doesn't move the show's progress.
 
 ## How it works
 
