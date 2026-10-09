@@ -73,8 +73,10 @@ docker run --rm -v "$PWD":/src -w /src -u $(id -u):$(id -g) -e HOME=/tmp \
 
 1. In Dashboard → Plugins → Repositories, add this repository URL:
    ```
-   https://raw.githubusercontent.com/daniel--/jellyfin-smart-shuffle/gh-pages/manifest.json
+   https://raw.githubusercontent.com/daniel--/jellyfin-plugins/gh-pages/manifest.json
    ```
+   It's shared with my other plugins, such as
+   [Session Persist](https://github.com/daniel--/jellyfin-session-persist).
 2. Install **Smart Shuffle** from the catalog, then restart Jellyfin.
 
 ### Manually
@@ -94,7 +96,9 @@ Publish a GitHub release with a tag like `v0.2.0` (or `v0.2.0.1`). The `Release`
 1. Builds the plugin zip with [jprm](https://github.com/oddstr13/jellyfin-plugin-repository-manager),
    using the release notes as the changelog.
 2. Attaches the zip to the release.
-3. Adds the new version to `manifest.json` on the `gh-pages` branch.
+3. Adds the new version to `manifest.json` on the `gh-pages` branch of
+   [jellyfin-plugins](https://github.com/daniel--/jellyfin-plugins). This needs the
+   `PLUGIN_REPO_TOKEN` secret: a fine-grained token with Contents read/write on that repo.
 
 Pre-releases get the zip attached but are not added to the manifest. When you move to a new
 Jellyfin version, bump `targetAbi` in `build.yaml` and the package versions in the `.csproj`.

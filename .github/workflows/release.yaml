@@ -1,8 +1,11 @@
 name: Release
 
 # Publish a GitHub release tagged vX.Y.Z (or vX.Y.Z.W) to build the plugin zip, attach it to the
-# release, and add it to the plugin repository manifest on the gh-pages branch.
-# Pre-releases get the zip attached but are not added to the manifest.
+# release, and add it to the shared plugin repository manifest on the gh-pages branch of
+# MANIFEST_REPO. Pre-releases get the zip attached but are not added to the manifest.
+#
+# Pushing to MANIFEST_REPO needs the PLUGIN_REPO_TOKEN secret: a fine-grained token with
+# Contents read/write on that repo.
 
 on:
   release:
@@ -11,7 +14,8 @@ on:
 permissions:
   contents: write
 
-# Manifest updates must not race each other.
+# Manifest updates from this repo must not race each other. Other plugin repos push to the
+# same manifest, so the push below also retries on conflicts.
 concurrency:
   group: plugin-repo
   cancel-in-progress: false
@@ -22,6 +26,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TAG: ${{ github.event.release.tag_name }}
+      MANIFEST_REPO: daniel--/jellyfin-plugins
     steps:
       - uses: actions/checkout@v7
 
@@ -70,24 +75,27 @@ jobs:
 
       - name: Add to plugin repository manifest
         if: ${{ !github.event.release.prerelease }}
+        env:
+          REPO_TOKEN: ${{ secrets.PLUGIN_REPO_TOKEN }}
         run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-
-          if git fetch --depth=1 origin gh-pages:refs/remotes/origin/gh-pages; then
-            git worktree add -B gh-pages repo origin/gh-pages
-          else
-            git worktree add --orphan -b gh-pages repo
-          fi
-
-          if [[ ! -f repo/manifest.json ]]; then
-            jprm repo init repo
-          fi
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email '41898282+github-actions[bot]@users.noreply.github.com'
 
           url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/$(basename "$ZIP")"
-          jprm --verbosity=debug repo add --plugin-url="$url" repo "$ZIP"
 
-          cd repo
-          git add manifest.json
-          git commit -m "Add Smart Shuffle $VERSION"
-          git push origin gh-pages
+          # Another plugin's release may push in between, so start again from the latest manifest.
+          for attempt in 1 2 3 4 5; do
+            rm -rf repo
+            git clone --depth=1 --branch=gh-pages \
+              "https://x-access-token:${REPO_TOKEN}@github.com/${MANIFEST_REPO}.git" repo
+            jprm --verbosity=debug repo add --plugin-url="$url" repo "$ZIP"
+            git -C repo add manifest.json
+            git -C repo commit -m "Add Smart Shuffle $VERSION"
+            if git -C repo push origin gh-pages; then
+              exit 0
+            fi
+            sleep $((attempt * 5))
+          done
+
+          echo "::error::Could not push to ${MANIFEST_REPO} after 5 attempts"
+          exit 1
