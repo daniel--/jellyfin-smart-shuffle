@@ -8,6 +8,14 @@
         "category": "General",
         "versions": [
             {
+                "version": "0.2.1.0",
+                "changelog": "- Episodes of shuffle shows played outside the Smart Shuffle playlist (for example from the show's page) no longer count as shuffle progress, reorder the playlist, or have their play count and last played date reset.",
+                "targetAbi": "12.1.0.0",
+                "sourceUrl": "https://github.com/daniel--/jellyfin-smart-shuffle/releases/download/v0.2.1/smart-shuffle_0.2.1.0.zip",
+                "checksum": "87c009b7b3b55209a53a43d9181e13c7",
+                "timestamp": "2026-10-09T16:38:10Z"
+            },
+            {
                 "version": "0.2.0.0",
                 "changelog": "- Keeps players' queues in sync with the current Smart Shuffle playlist. When a player starts an episode from an out-of-date or re-sorted copy of the playlist, the plugin replaces its queue with the current one (the episode restarts briefly). Can be turned off in the plugin settings.",
                 "targetAbi": "12.1.0.0",
