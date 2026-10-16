@@ -255,8 +255,12 @@ public sealed class PlaybackListener : IHostedService, IDisposable
             ? playlist.Skip(index).ToList()
             : playlist.Where(id => !id.Equals(previous)).Prepend(episode.Id).ToList();
 
-        // Jellyfin turns a one-episode play command into "the rest of that show", so never send one.
-        if (upcoming.Count < 2)
+        // The replacement queue is the whole playlist started at this episode, so it still holds more than
+        // one episode when this is the last one. Jellyfin turns a one-episode play command into "the rest of
+        // that show", so never send one.
+        var replacement = index >= 0 ? playlist : upcoming;
+        var startIndex = index >= 0 ? index : 0;
+        if (replacement.Count < 2)
         {
             return false;
         }
@@ -307,9 +311,9 @@ public sealed class PlaybackListener : IHostedService, IDisposable
             session.Id,
             new PlayRequest
             {
-                ItemIds = upcoming.ToArray(),
+                ItemIds = replacement.ToArray(),
                 PlayCommand = PlayCommand.PlayNow,
-                StartIndex = 0,
+                StartIndex = startIndex,
                 StartPositionTicks = seekTo ?? session.PlayState?.PositionTicks
             },
             cancellationToken).ConfigureAwait(false);
