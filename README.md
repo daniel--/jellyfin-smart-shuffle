@@ -109,8 +109,8 @@ Jellyfin version, bump `targetAbi` in `build.yaml` and the package versions in t
 - Play a shuffle episode to the end. Afterwards it should still show as watched, and the show should
   not appear in Next Up. The playlist should advance.
 - Stop halfway through. The episode should not appear in Continue Watching. Starting the playlist
-  again should jump to where you stopped. If it doesn't, try a longer resume delay; some clients
-  don't support remote seek at all.
+  again should jump to where you stopped, a few seconds after the episode starts playing. Some
+  clients don't support remote seek at all.
 - While an episode is playing, Jellyfin's progress reports put it in Continue Watching temporarily.
   It disappears when playback stops.
 
