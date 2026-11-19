@@ -26,6 +26,9 @@ public sealed class PlaybackListener : IHostedService, IDisposable
     // Players start the next item in their queue within a second or so of stopping the last one.
     private static readonly TimeSpan _continueWindow = TimeSpan.FromSeconds(30);
 
+    // How long to wait for a player to report that it's actually playing before sending commands anyway.
+    private static readonly TimeSpan _playingTimeout = TimeSpan.FromSeconds(30);
+
     private readonly ISessionManager _sessionManager;
     private readonly ICollectionManager _collectionManager;
     private readonly ISyncPlayManager _syncPlayManager;
@@ -36,6 +39,9 @@ public sealed class PlaybackListener : IHostedService, IDisposable
 
     // The last episode each session stopped, by session id.
     private readonly ConcurrentDictionary<string, LastStop> _lastStops = new();
+
+    // Sessions that have started an episode but haven't reported progress on it yet, by session id.
+    private readonly ConcurrentDictionary<string, PendingStart> _pendingStarts = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PlaybackListener"/> class.
@@ -66,6 +72,7 @@ public sealed class PlaybackListener : IHostedService, IDisposable
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _sessionManager.PlaybackStart += OnPlaybackStart;
+        _sessionManager.PlaybackProgress += OnPlaybackProgress;
         _sessionManager.PlaybackStopped += OnPlaybackStopped;
         _sessionManager.SessionEnded += OnSessionEnded;
         _collectionManager.ItemsAddedToCollection += OnCollectionChanged;
@@ -82,6 +89,7 @@ public sealed class PlaybackListener : IHostedService, IDisposable
     public async Task StopAsync(CancellationToken cancellationToken)
     {
         _sessionManager.PlaybackStart -= OnPlaybackStart;
+        _sessionManager.PlaybackProgress -= OnPlaybackProgress;
         _sessionManager.PlaybackStopped -= OnPlaybackStopped;
         _sessionManager.SessionEnded -= OnSessionEnded;
         _collectionManager.ItemsAddedToCollection -= OnCollectionChanged;
@@ -111,12 +119,18 @@ public sealed class PlaybackListener : IHostedService, IDisposable
         var continued = GetContinuedQueue(e.Session, episode);
         var syncQueue = Plugin.Instance?.Configuration.KeepPlayerQueueInSync != false;
 
+        // Registered now, before any work is queued, so no progress report is missed.
+        PendingStart? pending = null;
+
         foreach (var user in e.Users)
         {
             if (!_shuffleService.Handles(user, episode))
             {
                 continue;
             }
+
+            pending ??= AddPendingStart(e.Session, episode, e.PlaybackPositionTicks);
+            var playing = pending;
 
             Run(async ct =>
             {
@@ -126,9 +140,11 @@ public sealed class PlaybackListener : IHostedService, IDisposable
                     return;
                 }
 
-                // Clients need a moment to get their player going before they act on commands.
-                var delay = TimeSpan.FromSeconds(Math.Max(0, Plugin.Instance?.Configuration.ResumeSeekDelaySeconds ?? 3));
-                await Task.Delay(delay, ct).ConfigureAwait(false);
+                // Clients ignore commands sent while their player is still starting up.
+                if (!await WaitUntilPlayingAsync(e.Session, episode, playing, ct).ConfigureAwait(false))
+                {
+                    return;
+                }
 
                 var session = e.Session;
                 if (session.NowPlayingItem is null || !session.NowPlayingItem.Id.Equals(episode.Id))
@@ -170,6 +186,10 @@ public sealed class PlaybackListener : IHostedService, IDisposable
         {
             _lastStops[e.Session.Id] = new LastStop(episode.Id, DateTime.UtcNow);
             _reportedQueues.Remove(e.Session.Id);
+            if (_pendingStarts.TryGetValue(e.Session.Id, out var pending) && pending.EpisodeId.Equals(episode.Id))
+            {
+                RemovePendingStart(e.Session.Id, pending, false);
+            }
         }
 
         foreach (var user in e.Users)
@@ -185,6 +205,71 @@ public sealed class PlaybackListener : IHostedService, IDisposable
     {
         _lastStops.TryRemove(e.SessionInfo.Id, out _);
         _reportedQueues.Remove(e.SessionInfo.Id);
+        if (_pendingStarts.TryGetValue(e.SessionInfo.Id, out var pending))
+        {
+            RemovePendingStart(e.SessionInfo.Id, pending, false);
+        }
+    }
+
+    private void OnPlaybackProgress(object? sender, PlaybackProgressEventArgs e)
+    {
+        // This fires every few seconds for every playing session, so bail out early.
+        if (e.Session is null
+            || e.Item is null
+            || !_pendingStarts.TryGetValue(e.Session.Id, out var pending)
+            || !pending.EpisodeId.Equals(e.Item.Id))
+        {
+            return;
+        }
+
+        // Players can report progress while they're still buffering; the position moving on from where it
+        // started is what shows the player is really going.
+        if (!e.IsPaused && (e.PlaybackPositionTicks is not long position || position > pending.StartTicks))
+        {
+            RemovePendingStart(e.Session.Id, pending, true);
+        }
+    }
+
+    private PendingStart AddPendingStart(SessionInfo session, Episode episode, long? startTicks)
+    {
+        var pending = new PendingStart(
+            episode.Id,
+            startTicks ?? 0,
+            new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously));
+        _pendingStarts.AddOrUpdate(
+            session.Id,
+            pending,
+            (_, superseded) =>
+            {
+                superseded.Playing.TrySetResult(false);
+                return pending;
+            });
+        return pending;
+    }
+
+    private void RemovePendingStart(string sessionId, PendingStart pending, bool playing)
+    {
+        _pendingStarts.TryRemove(new KeyValuePair<string, PendingStart>(sessionId, pending));
+        pending.Playing.TrySetResult(playing);
+    }
+
+    /// <summary>
+    /// Waits for the player to report that the episode is actually playing. Returns false if it stopped or
+    /// moved on to something else first.
+    /// </summary>
+    private async Task<bool> WaitUntilPlayingAsync(SessionInfo session, Episode episode, PendingStart pending, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await pending.Playing.Task.WaitAsync(_playingTimeout, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            // Not every player reports progress; the caller still checks that it's on this episode.
+            _logger.LogDebug("{Client} hasn't reported progress on {Episode}, sending commands anyway", session.Client, episode.Name);
+            RemovePendingStart(session.Id, pending, true);
+            return true;
+        }
     }
 
     private void OnCollectionChanged(object? sender, CollectionModifiedEventArgs e)
@@ -367,4 +452,6 @@ public sealed class PlaybackListener : IHostedService, IDisposable
     }
 
     private sealed record LastStop(Guid EpisodeId, DateTime At);
+
+    private sealed record PendingStart(Guid EpisodeId, long StartTicks, TaskCompletionSource<bool> Playing);
 }

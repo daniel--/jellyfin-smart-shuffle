@@ -60,11 +60,6 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool IncludeSpecials { get; set; }
 
     /// <summary>
-    /// Gets or sets how long to wait after playback starts before seeking to the saved position.
-    /// </summary>
-    public int ResumeSeekDelaySeconds { get; set; } = 3;
-
-    /// <summary>
     /// Gets or sets a value indicating whether a player moving on through an out-of-date copy of the
     /// playlist has its queue replaced with the current one.
     /// </summary>

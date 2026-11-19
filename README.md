@@ -31,12 +31,13 @@ This has to happen before playback, because Jellyfin 12.1 overwrites `LastPlayed
 playback starts, before plugins are notified.
 
 **On playback start:** the recorded values are set aside to restore later. If a position is saved,
-it seeks there after `ResumeSeekDelaySeconds`.
+it seeks there once the player reports that it's actually playing (its position has moved on).
+Players ignore commands sent while they're still starting up.
 
 **Keeping players in sync:** a player copies the playlist into its own queue when you press play,
 and may sort it. Later refreshes never reach that copy. Players send their queue with each playback
 start report, but Jellyfin drops it, so the plugin adds an API filter (`Playback/`) that records it.
-After `ResumeSeekDelaySeconds`, the plugin compares that queue with the current playlist:
+Once the player is playing, the plugin compares that queue with the current playlist:
 
 - **Matches:** nothing to do. New episodes at the end of the playlist are appended without interrupting playback.
 - **Started at the top of a copy of the playlist** (Play was pressed) but not on the playlist's first
