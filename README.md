@@ -33,6 +33,9 @@ playback starts, before plugins are notified.
 **On playback start:** the recorded values are set aside to restore later. If a position is saved,
 it seeks there once the player reports that it's actually playing (its position has moved on).
 Players ignore commands sent while they're still starting up.
+The plugin then watches the player's progress reports: if it's playing well short of the saved position,
+the seek is sent again, up to three times in all. Jellyfin for Android TV sometimes restarts the episode
+from the beginning instead of seeking.
 
 **Keeping players in sync:** a player copies the playlist into its own queue when you press play,
 and may sort it. Later refreshes never reach that copy. Players send their queue with each playback

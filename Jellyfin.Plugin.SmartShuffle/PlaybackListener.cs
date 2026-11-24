@@ -23,11 +23,27 @@ namespace Jellyfin.Plugin.SmartShuffle;
 /// </summary>
 public sealed class PlaybackListener : IHostedService, IDisposable
 {
+    // How many times a player is asked to jump to the saved position before giving up.
+    private const int MaxSeekAttempts = 3;
+
     // Players start the next item in their queue within a second or so of stopping the last one.
     private static readonly TimeSpan _continueWindow = TimeSpan.FromSeconds(30);
 
     // How long to wait for a player to report that it's actually playing before sending commands anyway.
     private static readonly TimeSpan _playingTimeout = TimeSpan.FromSeconds(30);
+
+    // How long after a seek command the player's progress reports are checked against it.
+    private static readonly TimeSpan _seekCheckWindow = TimeSpan.FromSeconds(60);
+
+    // Progress reports this soon after a seek command can still carry the position from before it.
+    private static readonly TimeSpan _seekSettleTime = TimeSpan.FromSeconds(2);
+
+    // A player this far short of the saved position didn't act on the seek.
+    private static readonly long _seekBehindTolerance = TimeSpan.FromSeconds(10).Ticks;
+
+    // A player has to play on this far past the saved position to show that it got there. Some players
+    // report the position they were asked for, not where they really are, until playback picks up again.
+    private static readonly long _seekConfirmMargin = TimeSpan.FromSeconds(1).Ticks;
 
     private readonly ISessionManager _sessionManager;
     private readonly ICollectionManager _collectionManager;
@@ -42,6 +58,9 @@ public sealed class PlaybackListener : IHostedService, IDisposable
 
     // Sessions that have started an episode but haven't reported progress on it yet, by session id.
     private readonly ConcurrentDictionary<string, PendingStart> _pendingStarts = new();
+
+    // Sessions that were asked to jump to a saved position and haven't shown that they did, by session id.
+    private readonly ConcurrentDictionary<string, PendingSeek> _pendingSeeks = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PlaybackListener"/> class.
@@ -115,6 +134,9 @@ public sealed class PlaybackListener : IHostedService, IDisposable
             return;
         }
 
+        // A seek still being checked belonged to whatever the session was playing before.
+        _pendingSeeks.TryRemove(e.Session.Id, out _);
+
         // Read now: the session's queue is replaced when this episode stops.
         var continued = GetContinuedQueue(e.Session, episode);
         var syncQueue = Plugin.Instance?.Configuration.KeepPlayerQueueInSync != false;
@@ -169,6 +191,8 @@ public sealed class PlaybackListener : IHostedService, IDisposable
 
                 if (seekTo is long ticks)
                 {
+                    // Checked against the player's progress reports from here on, and sent again if needed.
+                    _pendingSeeks[session.Id] = new PendingSeek(episode.Id, ticks, 1, DateTime.UtcNow);
                     await SeekAsync(session, episode, ticks, ct).ConfigureAwait(false);
                 }
             });
@@ -190,6 +214,11 @@ public sealed class PlaybackListener : IHostedService, IDisposable
             {
                 RemovePendingStart(e.Session.Id, pending, false);
             }
+
+            if (_pendingSeeks.TryGetValue(e.Session.Id, out var seek) && seek.EpisodeId.Equals(episode.Id))
+            {
+                _pendingSeeks.TryRemove(new KeyValuePair<string, PendingSeek>(e.Session.Id, seek));
+            }
         }
 
         foreach (var user in e.Users)
@@ -205,6 +234,7 @@ public sealed class PlaybackListener : IHostedService, IDisposable
     {
         _lastStops.TryRemove(e.SessionInfo.Id, out _);
         _reportedQueues.Remove(e.SessionInfo.Id);
+        _pendingSeeks.TryRemove(e.SessionInfo.Id, out _);
         if (_pendingStarts.TryGetValue(e.SessionInfo.Id, out var pending))
         {
             RemovePendingStart(e.SessionInfo.Id, pending, false);
@@ -214,20 +244,96 @@ public sealed class PlaybackListener : IHostedService, IDisposable
     private void OnPlaybackProgress(object? sender, PlaybackProgressEventArgs e)
     {
         // This fires every few seconds for every playing session, so bail out early.
-        if (e.Session is null
-            || e.Item is null
-            || !_pendingStarts.TryGetValue(e.Session.Id, out var pending)
-            || !pending.EpisodeId.Equals(e.Item.Id))
+        if (e.Session is null || e.Item is null)
         {
             return;
         }
 
         // Players can report progress while they're still buffering; the position moving on from where it
         // started is what shows the player is really going.
-        if (!e.IsPaused && (e.PlaybackPositionTicks is not long position || position > pending.StartTicks))
+        if (_pendingStarts.TryGetValue(e.Session.Id, out var pending)
+            && pending.EpisodeId.Equals(e.Item.Id)
+            && !e.IsPaused
+            && (e.PlaybackPositionTicks is not long position || position > pending.StartTicks))
         {
             RemovePendingStart(e.Session.Id, pending, true);
         }
+
+        if (_pendingSeeks.TryGetValue(e.Session.Id, out var seek))
+        {
+            CheckSeek(e, seek);
+        }
+    }
+
+    /// <summary>
+    /// Checks a progress report against the position the player was asked to jump to, and asks again if
+    /// the player is playing somewhere well short of it. Jellyfin for Android TV, for one, restarts the
+    /// episode from the beginning when a seek reaches it before its player can seek.
+    /// </summary>
+    private void CheckSeek(PlaybackProgressEventArgs e, PendingSeek seek)
+    {
+        var session = e.Session;
+        var pendingSeek = new KeyValuePair<string, PendingSeek>(session.Id, seek);
+        var now = DateTime.UtcNow;
+        if (e.Item is not Episode episode
+            || !seek.EpisodeId.Equals(episode.Id)
+            || now - seek.SentAt > _seekCheckWindow)
+        {
+            _pendingSeeks.TryRemove(pendingSeek);
+            return;
+        }
+
+        if (e.IsPaused
+            || e.PlaybackPositionTicks is not long position
+            || now - seek.SentAt < _seekSettleTime)
+        {
+            return;
+        }
+
+        if (position >= seek.TargetTicks + _seekConfirmMargin)
+        {
+            _pendingSeeks.TryRemove(pendingSeek);
+            return;
+        }
+
+        // Only a player that's moving can be told apart from one that's still starting up again.
+        if (position <= 0 || position >= seek.TargetTicks - _seekBehindTolerance)
+        {
+            return;
+        }
+
+        if (seek.Attempts >= MaxSeekAttempts)
+        {
+            if (_pendingSeeks.TryRemove(pendingSeek))
+            {
+                _logger.LogWarning(
+                    "{Client} is at {Position} in {Episode} after being asked {Attempts} times to resume at {Target}, giving up",
+                    session.Client,
+                    TimeSpan.FromTicks(position),
+                    episode.Name,
+                    seek.Attempts,
+                    TimeSpan.FromTicks(seek.TargetTicks));
+            }
+
+            return;
+        }
+
+        // Whichever report gets its update in sends the command, so reports arriving together send one.
+        var retry = seek with { Attempts = seek.Attempts + 1, SentAt = now };
+        if (!_pendingSeeks.TryUpdate(session.Id, retry, seek))
+        {
+            return;
+        }
+
+        _logger.LogInformation(
+            "{Client} is at {Position} in {Episode} after being asked to resume at {Target}, asking again (attempt {Attempt} of {MaxAttempts})",
+            session.Client,
+            TimeSpan.FromTicks(position),
+            episode.Name,
+            TimeSpan.FromTicks(seek.TargetTicks),
+            retry.Attempts,
+            MaxSeekAttempts);
+        Run(ct => SeekAsync(session, episode, seek.TargetTicks, ct));
     }
 
     private PendingStart AddPendingStart(SessionInfo session, Episode episode, long? startTicks)
@@ -452,6 +558,8 @@ public sealed class PlaybackListener : IHostedService, IDisposable
     }
 
     private sealed record LastStop(Guid EpisodeId, DateTime At);
+
+    private sealed record PendingSeek(Guid EpisodeId, long TargetTicks, int Attempts, DateTime SentAt);
 
     private sealed record PendingStart(Guid EpisodeId, long StartTicks, TaskCompletionSource<bool> Playing);
 }
