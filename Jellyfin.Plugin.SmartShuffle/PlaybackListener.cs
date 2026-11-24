@@ -192,7 +192,7 @@ public sealed class PlaybackListener : IHostedService, IDisposable
                 if (seekTo is long ticks)
                 {
                     // Checked against the player's progress reports from here on, and sent again if needed.
-                    _pendingSeeks[session.Id] = new PendingSeek(episode.Id, ticks, 1, DateTime.UtcNow);
+                    _pendingSeeks[session.Id] = new PendingSeek(episode.Id, ticks, 1, DateTime.UtcNow, null);
                     await SeekAsync(session, episode, ticks, ct).ConfigureAwait(false);
                 }
             });
@@ -267,7 +267,7 @@ public sealed class PlaybackListener : IHostedService, IDisposable
 
     /// <summary>
     /// Checks a progress report against the position the player was asked to jump to, and asks again if
-    /// the player is playing somewhere well short of it. Jellyfin for Android TV, for one, restarts the
+    /// the player is playing on from somewhere well short of it. Jellyfin for Android TV, for one, restarts the
     /// episode from the beginning when a seek reaches it before its player can seek.
     /// </summary>
     private void CheckSeek(PlaybackProgressEventArgs e, PendingSeek seek)
@@ -296,9 +296,17 @@ public sealed class PlaybackListener : IHostedService, IDisposable
             return;
         }
 
-        // Only a player that's moving can be told apart from one that's still starting up again.
         if (position <= 0 || position >= seek.TargetTicks - _seekBehindTolerance)
         {
+            return;
+        }
+
+        // One report short of the saved position isn't enough: players can still report where they were
+        // before the seek a few seconds after acting on it. A second one that has played on from the first
+        // shows the player really is playing back there.
+        if (seek.BehindTicks is not long behind || position < behind + _seekConfirmMargin)
+        {
+            _pendingSeeks.TryUpdate(session.Id, seek with { BehindTicks = position }, seek);
             return;
         }
 
@@ -319,7 +327,7 @@ public sealed class PlaybackListener : IHostedService, IDisposable
         }
 
         // Whichever report gets its update in sends the command, so reports arriving together send one.
-        var retry = seek with { Attempts = seek.Attempts + 1, SentAt = now };
+        var retry = seek with { Attempts = seek.Attempts + 1, SentAt = now, BehindTicks = null };
         if (!_pendingSeeks.TryUpdate(session.Id, retry, seek))
         {
             return;
@@ -559,7 +567,8 @@ public sealed class PlaybackListener : IHostedService, IDisposable
 
     private sealed record LastStop(Guid EpisodeId, DateTime At);
 
-    private sealed record PendingSeek(Guid EpisodeId, long TargetTicks, int Attempts, DateTime SentAt);
+    // BehindTicks is where the player last reported being, if that was short of the target.
+    private sealed record PendingSeek(Guid EpisodeId, long TargetTicks, int Attempts, DateTime SentAt, long? BehindTicks);
 
     private sealed record PendingStart(Guid EpisodeId, long StartTicks, TaskCompletionSource<bool> Playing);
 }

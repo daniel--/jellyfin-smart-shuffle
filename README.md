@@ -33,7 +33,7 @@ playback starts, before plugins are notified.
 **On playback start:** the recorded values are set aside to restore later. If a position is saved,
 it seeks there once the player reports that it's actually playing (its position has moved on).
 Players ignore commands sent while they're still starting up.
-The plugin then watches the player's progress reports: if it's playing well short of the saved position,
+The plugin then watches the player's progress reports: if two reports in a row show it playing on from well short of the saved position,
 the seek is sent again, up to three times in all. Jellyfin for Android TV sometimes restarts the episode
 from the beginning instead of seeking.
 
